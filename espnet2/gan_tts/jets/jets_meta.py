@@ -31,6 +31,7 @@ from espnet2.gan_tts.utils import get_segments
 from espnet2.torch_utils.device_funcs import force_gatherable
 
 from espnet2.gan_tts.jets.saln import SALNEncoder, MelStyleEncoder
+from espnet2.gan_tts.jets.style_discriminator import MetaDiscriminator
 from espnet2.gan_tts.jets.length_regulator import GaussianUpsampling,LengthRegulator
 from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask, make_pad_mask
 
@@ -143,6 +144,7 @@ class JETS(AbsGANTTS):
             "gst_gru_layers": 1,
             "gst_gru_units": 128,
             "use_saln": True,
+            "meta_learning": True,
             "init_type": "xavier_uniform",
             "init_enc_alpha": 1.0,
             "init_dec_alpha": 1.0,
@@ -262,6 +264,10 @@ class JETS(AbsGANTTS):
             **discriminator_params,
         )
 
+        # Meta-learning
+        self.meta_generator = self.generator
+        self.meta_discriminator = self.discriminator
+
         self.generator_adv_loss = GeneratorAdversarialLoss(
             **generator_adv_loss_params,
         )
@@ -276,6 +282,13 @@ class JETS(AbsGANTTS):
         )
         self.var_loss = VarianceLoss()
         self.forwardsum_loss = ForwardSumLoss()
+
+        # Meta-StyleSpeech 
+        if self.generator.use_saln:
+            self.meta_discriminator = self.generator.meta_discriminator
+            self.meta_adv_loss = self.meta_discriminator.get_criterion()
+
+        self.length_regulator = GaussianUpsampling()
 
         # coefficients
         self.lambda_adv = lambda_adv
@@ -299,6 +312,7 @@ class JETS(AbsGANTTS):
         self.use_gst = getattr(self.generator, "use_gst", False)
 
         self.use_saln = getattr(self.generator, "use_saln", True)
+        self.meta_learning = getattr(self.generator, "meta_learning", True)
 
     @property
     def require_raw_speech(self):
@@ -433,24 +447,46 @@ class JETS(AbsGANTTS):
             self._cache = outs
 
         if self.use_saln:
-            # parse outputs
-            (
-                speech_hat_,
-                bin_loss,
-                log_p_attn,
-                start_idxs,
-                d_outs,
-                ds,
-                p_outs,
-                ps,
-                e_outs,
-                es,
-            ) = outs
-            speech_ = get_segments(
-                x=speech,
-                start_idxs=start_idxs * self.generator.upsample_factor,
-                segment_size=self.generator.segment_size * self.generator.upsample_factor,
-            )
+            if self.meta_learning:
+                # parse outputs
+                (
+                    speech_hat_,
+                    zs,
+                    bin_loss,
+                    log_p_attn,
+                    start_idxs,
+                    d_outs,
+                    ds,
+                    p_outs,
+                    ps,
+                    e_outs,
+                    es,
+                    style_vector,
+                ) = outs
+                speech_ = get_segments(
+                    x=speech,
+                    start_idxs=start_idxs * self.generator.upsample_factor,
+                    segment_size=self.generator.segment_size * self.generator.upsample_factor,
+                )
+            else:
+                # parse outputs
+                (
+                    speech_hat_,
+                    bin_loss,
+                    log_p_attn,
+                    start_idxs,
+                    d_outs,
+                    ds,
+                    p_outs,
+                    ps,
+                    e_outs,
+                    es,
+                ) = outs
+                speech_ = get_segments(
+                    x=speech,
+                    start_idxs=start_idxs * self.generator.upsample_factor,
+                    segment_size=self.generator.segment_size * self.generator.upsample_factor,
+                )
         else:
             # parse outputs
             (
@@ -494,6 +530,71 @@ class JETS(AbsGANTTS):
 
         var_loss = (dur_loss + pitch_loss + energy_loss) * self.lambda_var
         align_loss = (forwardsum_loss + bin_loss) * self.lambda_align
+
+        
+        # Support Data
+        # X_s: feats
+        # q_s: 
+
+        ##########################################################
+        ########## Meta Learning##################################
+        ##########################################################
+        
+        # Get query text
+        B = feats.shape[0]
+        perm_idx = torch.randperm(B)
+        q_text = text[perm_idx]
+        q_text_lengths = torch.tensor(
+            [q_text.size(1)],
+            dtype=torch.long,
+            device=q_text.device,
+        )
+
+
+        print('-------text shape:',text.shape)
+        print('-------q_text shape:',q_text.shape)
+
+        # Generate query speech
+        zs,dur = self.meta_generator.meta_inference(q_text,
+                                            q_text_lengths,
+                                            feats)
+
+        '''
+        Adversarial loss   
+        zs: query mel (~X_q), feats: source mel (X_s)
+        n_src_vocab = n_symbols+1 = 151+1= 152
+        q_srcs: text(word) embedding
+        meta_adv_loss: E[D_s(G(t_q,w_s),s_i)-1)^2]+E[D_t(G(t_q,w_s),t_q)-1)^2]
+        style vector는 style discriminator에서만 필요함
+        t_val: D_t(~X_q, t_q), s_val: D_s(~X_q, s_i)
+        '''
+
+        src_word_emb = torch.nn.Embedding(152, self.generator.adim, padding_idx=0,device='cuda')
+        q_src_output = src_word_emb(q_text)
+        print('----------q_src output:',q_src_output.shape)
+
+        # upsampling
+        h_masks = make_non_pad_mask(feats_lengths).to(q_src_output.device)
+        d_masks = make_non_pad_mask(text_lengths).to(dur.device)
+        q_src = self.length_regulator(q_src_output, dur, h_masks, d_masks)  # (B, T_feats, adim)
+
+        # length_regulator = LengthRegulator()
+        # print('----------dur shape:',dur.shape)
+        # q_src,_,_ = length_regulator(q_src_output,dur)
+
+        print('----------q_src shape:',q_src.shape)
+
+        t_val, s_val, _= self.meta_discriminator(zs, q_src, style_vector, sids, mask=None)
+        qt_adv_losses = self.meta_adv_loss(t_val, is_real=True)
+        qs_adv_losses = self.meta_adv_loss(s_val, is_real=True)
+        meta_adv_loss = qt_adv_losses + qs_adv_losses
+
+        # Total generator loss
+        alpha = 10.0
+        recon_loss = F.l1_loss(zs,feats)
+        g_loss += alpha*recon_loss + meta_adv_loss
+
+        ##########################################################
 
         loss = g_loss + var_loss + align_loss
 
@@ -607,6 +708,62 @@ class JETS(AbsGANTTS):
         # calculate losses
         real_loss, fake_loss = self.discriminator_adv_loss(p_hat, p)
         loss = real_loss + fake_loss
+
+
+        '''
+        Adversarial loss   
+        zs: query mel (~X_q), feats: source mel (X_s)
+        n_src_vocab = n_symbols+1 = 151+1= 152
+        q_srcs: text(word) embedding
+        meta_adv_loss: E[D_s(G(t_q,w_s),s_i)-1)^2]+E[D_t(G(t_q,w_s),t_q)-1)^2]
+        style vector는 style discriminator에서만 필요함
+        t_val: D_t(~X_q, t_q), s_val: D_s(~X_q, s_i)
+        '''
+
+        ####################################
+        ##### Meta-Learning ################
+        ####################################
+
+        # Get query text
+        B = feats.shape[0]
+        perm_idx = torch.randperm(B)
+        q_text = text[perm_idx]
+        q_text_lengths = torch.tensor(
+            [q_text.size(1)],
+            dtype=torch.long,
+            device=q_text.device,
+        )
+        # Generate query speech
+        zs,dur = self.meta_generator.meta_inference(q_text,
+                                            q_text_lengths,
+                                            feats)
+
+        src_word_emb = torch.nn.Embedding(152, self.generator.adim, padding_idx=0,device='cuda')
+        q_src_output = src_word_emb(q_text)
+
+        # upsampling
+        h_masks = make_non_pad_mask(feats_lengths).to(hs.device)
+        d_masks = make_non_pad_mask(text_lengths).to(ds.device)
+        q_src = self.length_regulator(q_src_output, dur, h_masks, d_masks)  # (B, T_feats, adim)
+
+        # length_regulator = LengthRegulator()
+        # q_src,_,_ = length_regulator(q_src_output,dur)
+
+        src_target_output = src_word_emb(text)
+        src_target,_,_ = length_regulator(q_src_output,ds)
+
+        # Real
+        real_t_pred, real_s_pred, cls_loss = self.meta_discriminator(
+            feats, src_target.detach(), style_vector.detach(), sids, mask=None)
+
+        # Fake
+        fake_t_pred, fake_s_pred, _= self.meta_discriminator(
+            zs.detach(), q_src.detach(), None, sids, mask=None)
+
+        dt_loss = self.meta_adv_loss(real_t_pred, is_real=True) + adversarial_loss(fake_t_pred, is_real=False)
+        ds_loss = self.meta_adv_loss(real_s_pred, is_real=True) + adversarial_loss(fake_s_pred, is_real=False)
+
+        loss += dt_loss+ ds_loss+cls_loss
 
         stats = dict(
             discriminator_loss=loss.item(),
