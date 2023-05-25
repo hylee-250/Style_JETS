@@ -133,7 +133,7 @@ class IterableESPnetDataset(IterableDataset):
         _mes += f"\n  preprocess: {self.preprocess})"
         return _mes
 
-    def __iter__(self) -> Iterator[Tuple[Union[str, int], Dict[str, np.ndarray]]]:
+    def __iter__(self) -> Iterator[Tuple[Union[str, int], Dict[str, np.ndarray]]]:        
         if self.key_file is not None:
             uid_iter = (
                 line.rstrip().split(maxsplit=1)[0]

@@ -214,7 +214,7 @@ class GANTTSTask(AbsTask):
         return CommonCollateFn(
             float_pad_value=0.0,
             int_pad_value=0,
-            not_sequence=["spembs", "sids"],
+            not_sequence=["spembs", "sids", "lids"],
         )
 
     @classmethod
@@ -259,6 +259,7 @@ class GANTTSTask(AbsTask):
                 "pitch",
                 "energy",
                 "sids",
+                "lids",
             )
         else:
             # Inference mode
@@ -269,7 +270,7 @@ class GANTTSTask(AbsTask):
                 "pitch",
                 "energy",
                 "sids",
-                "ref",
+                "lids",
             )
         return retval
 

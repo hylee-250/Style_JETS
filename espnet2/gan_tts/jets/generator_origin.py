@@ -32,9 +32,6 @@ from espnet.nets.pytorch_backend.transformer.encoder import (
     Encoder as TransformerEncoder,
 )
 
-from espnet2.gan_tts.jets.saln import SALNEncoder, MelStyleEncoder
-from espnet2.gan_tts.jets.style_discriminator import MetaDiscriminator
-
 
 class JETSGenerator(torch.nn.Module):
     """Generator module in JETS."""
@@ -111,13 +108,6 @@ class JETSGenerator(torch.nn.Module):
         gst_conv_stride: int = 2,
         gst_gru_layers: int = 1,
         gst_gru_units: int = 128,
-        
-        # Style adaptation
-        use_saln: bool = True,
-
-        # Meta-learning
-        meta_learning: bool = True,
-        
         # training related
         init_type: str = "xavier_uniform",
         init_enc_alpha: float = 1.0,
@@ -260,7 +250,6 @@ class JETSGenerator(torch.nn.Module):
         self.upsample_factor = int(np.prod(generator_upsample_scales))
         self.idim = idim
         self.odim = odim
-        self.adim = adim
         self.reduction_factor = reduction_factor
         self.encoder_type = encoder_type
         self.decoder_type = decoder_type
@@ -269,8 +258,6 @@ class JETSGenerator(torch.nn.Module):
         self.use_scaled_pos_enc = use_scaled_pos_enc
         self.use_gst = use_gst
 
-        self.use_saln = use_saln
-
         # use idx 0 as padding idx
         self.padding_idx = 0
 
@@ -278,29 +265,6 @@ class JETSGenerator(torch.nn.Module):
         pos_enc_class = (
             ScaledPositionalEncoding if self.use_scaled_pos_enc else PositionalEncoding
         )
-
-        if self.use_saln:
-            # Mel Style Encoder
-            self.style_encoder = MelStyleEncoder(
-                n_mel=80,
-                hidden_dim = 128,
-                out_dim=128,
-                kernel_size=5,
-                n_head=2,
-                dropout=0.1
-            )
-
-            self.meta_discriminator = MetaDiscriminator(
-                n_speakers=559,
-                n_mel=80,
-                hidden_dim=128,
-                style_dim=128,
-                style_kernel_size=5,
-                style_head=2,
-                encoder_hidden=256,
-                max_seq_len=1000,
-            )
-
 
         # check relative positional encoding compatibility
         if "conformer" in [encoder_type, decoder_type]:
@@ -330,25 +294,8 @@ class JETSGenerator(torch.nn.Module):
         encoder_input_layer = torch.nn.Embedding(
             num_embeddings=idim, embedding_dim=adim, padding_idx=self.padding_idx
         )
-        # if encoder_type == "transformer":
-        #     self.encoder = TransformerEncoder(
-        #         idim=idim,
-        #         attention_dim=adim,
-        #         attention_heads=aheads,
-        #         linear_units=eunits,
-        #         num_blocks=elayers,
-        #         input_layer=encoder_input_layer,
-        #         dropout_rate=transformer_enc_dropout_rate,
-        #         positional_dropout_rate=transformer_enc_positional_dropout_rate,
-        #         attention_dropout_rate=transformer_enc_attn_dropout_rate,
-        #         pos_enc_class=pos_enc_class,
-        #         normalize_before=encoder_normalize_before,
-        #         concat_after=encoder_concat_after,
-        #         positionwise_layer_type=positionwise_layer_type,
-        #         positionwise_conv_kernel_size=positionwise_conv_kernel_size,
-        #     )
         if encoder_type == "transformer":
-            self.encoder = SALNEncoder(
+            self.encoder = TransformerEncoder(
                 idim=idim,
                 attention_dim=adim,
                 attention_heads=aheads,
@@ -363,7 +310,6 @@ class JETSGenerator(torch.nn.Module):
                 concat_after=encoder_concat_after,
                 positionwise_layer_type=positionwise_layer_type,
                 positionwise_conv_kernel_size=positionwise_conv_kernel_size,
-                style_dim =128,
             )
         elif encoder_type == "conformer":
             self.encoder = ConformerEncoder(
@@ -483,25 +429,8 @@ class JETSGenerator(torch.nn.Module):
         # define decoder
         # NOTE: we use encoder as decoder
         # because fastspeech's decoder is the same as encoder
-        # if decoder_type == "transformer":
-        #     self.decoder = TransformerEncoder(
-        #         idim=0,
-        #         attention_dim=adim,
-        #         attention_heads=aheads,
-        #         linear_units=dunits,
-        #         num_blocks=dlayers,
-        #         input_layer=None,
-        #         dropout_rate=transformer_dec_dropout_rate,
-        #         positional_dropout_rate=transformer_dec_positional_dropout_rate,
-        #         attention_dropout_rate=transformer_dec_attn_dropout_rate,
-        #         pos_enc_class=pos_enc_class,
-        #         normalize_before=decoder_normalize_before,
-        #         concat_after=decoder_concat_after,
-        #         positionwise_layer_type=positionwise_layer_type,
-        #         positionwise_conv_kernel_size=positionwise_conv_kernel_size,
-        #     )
         if decoder_type == "transformer":
-            self.decoder = SALNEncoder(
+            self.decoder = TransformerEncoder(
                 idim=0,
                 attention_dim=adim,
                 attention_heads=aheads,
@@ -516,7 +445,6 @@ class JETSGenerator(torch.nn.Module):
                 concat_after=decoder_concat_after,
                 positionwise_layer_type=positionwise_layer_type,
                 positionwise_conv_kernel_size=positionwise_conv_kernel_size,
-                style_dim = 128,
             )
         elif decoder_type == "conformer":
             self.decoder = ConformerEncoder(
@@ -626,17 +554,9 @@ class JETSGenerator(torch.nn.Module):
         pitch = pitch[:, : pitch_lengths.max()]  # for data-parallel
         energy = energy[:, : energy_lengths.max()]  # for data-parallel
 
-        if self.use_saln:
-            # Extract Style vector
-            style_vector = self.style_encoder(feats)
-
-            # forward encoder
-            x_masks = self._source_mask(text_lengths)
-            hs, _ = self.encoder(text, style_vector, x_masks)  # (B, T_text, adim)
-        else:
-            # forward encoder
-            x_masks = self._source_mask(text_lengths)
-            hs, _ = self.encoder(text, x_masks)  # (B, T_text, adim)
+        # forward encoder
+        x_masks = self._source_mask(text_lengths)
+        hs, _ = self.encoder(text, x_masks)  # (B, T_text, adim)
 
         # integrate with GST
         if self.use_gst:
@@ -687,15 +607,9 @@ class JETSGenerator(torch.nn.Module):
         d_masks = make_non_pad_mask(text_lengths).to(ds.device)
         hs = self.length_regulator(hs, ds, h_masks, d_masks)  # (B, T_feats, adim)
 
-        if self.use_saln:
-            # forward decoder
-            h_masks = self._source_mask(feats_lengths)
-            zs, _ = self.decoder(hs,style_vector, h_masks)  # (B, T_feats, adim)
-        else:
-            # forward decoder
-            h_masks = self._source_mask(feats_lengths)
-            zs, _ = self.decoder(hs, h_masks)  # (B, T_feats, adim)
-
+        # forward decoder
+        h_masks = self._source_mask(feats_lengths)
+        zs, _ = self.decoder(hs, h_masks)  # (B, T_feats, adim)
 
         # get random segments
         z_segments, z_start_idxs = get_random_segments(
@@ -706,35 +620,18 @@ class JETSGenerator(torch.nn.Module):
         # forward generator
         wav = self.generator(z_segments)
 
-        if self.use_saln:
-            return (
-                wav,
-                zs,
-                bin_loss,
-                log_p_attn,
-                z_start_idxs,
-                d_outs,
-                ds,
-                p_outs,
-                ps,
-                e_outs,
-                es,
-                style_vector,
-            )
-        else:
-            return (
-                wav,
-                bin_loss,
-                log_p_attn,
-                z_start_idxs,
-                d_outs,
-                ds,
-                p_outs,
-                ps,
-                e_outs,
-                es,
-            )
-
+        return (
+            wav,
+            bin_loss,
+            log_p_attn,
+            z_start_idxs,
+            d_outs,
+            ds,
+            p_outs,
+            ps,
+            e_outs,
+            es,
+        )
 
     def inference(
         self,
@@ -768,11 +665,9 @@ class JETSGenerator(torch.nn.Module):
             Tensor: Duration tensor (B, T_text).
 
         """
-        # Extract style vector
-        style_vector = self.style_encoder(feats)
         # forward encoder
         x_masks = self._source_mask(text_lengths)
-        hs, _ = self.encoder(text,style_vector, x_masks)  # (B, T_text, adim)
+        hs, _ = self.encoder(text, x_masks)  # (B, T_text, adim)
 
         # integrate with GST
         if self.use_gst:
@@ -825,139 +720,12 @@ class JETSGenerator(torch.nn.Module):
             h_masks = self._source_mask(feats_lengths)
         else:
             h_masks = None
-        zs, _ = self.decoder(hs,style_vector ,h_masks)  # (B, T_feats, adim)
+        zs, _ = self.decoder(hs, h_masks)  # (B, T_feats, adim)
 
         # forward generator
         wav = self.generator(zs.transpose(1, 2))
 
         return wav.squeeze(1), d_outs
-
-    def _integrate_with_spk_embed(
-        self, hs: torch.Tensor, spembs: torch.Tensor
-    ) -> torch.Tensor:
-        """Integrate speaker embedding with hidden states.
-
-        Args:
-            hs (Tensor): Batch of hidden state sequences (B, T_text, adim).
-            spembs (Tensor): Batch of speaker embeddings (B, spk_embed_dim).
-
-        Returns:
-            Tensor: Batch of integrated hidden state sequences (B, T_text, adim).
-
-        """
-        if self.spk_embed_integration_type == "add":
-            # apply projection and then add to hidden states
-            spembs = self.projection(F.normalize(spembs))
-            hs = hs + spembs.unsqueeze(1)
-        elif self.spk_embed_integration_type == "concat":
-            # concat hidden states with spk embeds and then apply projection
-            spembs = F.normalize(spembs).unsqueeze(1).expand(-1, hs.size(1), -1)
-            hs = self.projection(torch.cat([hs, spembs], dim=-1))
-        else:
-            raise NotImplementedError("support only add or concat.")
-
-        return hs
-    
-    def meta_inference(
-        self,
-        text: torch.Tensor,
-        text_lengths: torch.Tensor,
-        feats: Optional[torch.Tensor] = None,
-        feats_lengths: Optional[torch.Tensor] = None,
-        pitch: Optional[torch.Tensor] = None,
-        energy: Optional[torch.Tensor] = None,
-        sids: Optional[torch.Tensor] = None,
-        spembs: Optional[torch.Tensor] = None,
-        lids: Optional[torch.Tensor] = None,
-        use_teacher_forcing: bool = False,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Run inference.
-
-        Args:
-            text (Tensor): Input text index tensor (B, T_text,).
-            text_lengths (Tensor): Text length tensor (B,).
-            feats (Tensor): Feature tensor (B, T_feats, aux_channels).
-            feats_lengths (Tensor): Feature length tensor (B,).
-            pitch (Tensor): Pitch tensor (B, T_feats, 1)
-            energy (Tensor): Energy tensor (B, T_feats, 1)
-            sids (Optional[Tensor]): Speaker index tensor (B,) or (B, 1).
-            spembs (Optional[Tensor]): Speaker embedding tensor (B, spk_embed_dim).
-            lids (Optional[Tensor]): Language index tensor (B,) or (B, 1).
-            use_teacher_forcing (bool): Whether to use teacher forcing.
-
-        Returns:
-            Tensor: Generated waveform tensor (B, T_wav).
-            Tensor: Duration tensor (B, T_text).
-
-        """
-        # Extract style vector
-        style_vector = self.style_encoder(feats)
-        # forward encoder
-        x_masks = self._source_mask(text_lengths)
-        hs, _ = self.encoder(text,style_vector, x_masks)  # (B, T_text, adim)
-
-        # integrate with GST
-        if self.use_gst:
-            style_embs = self.gst(feats)
-            hs = hs + style_embs.unsqueeze(1)
-
-        # integrate with SID and LID embeddings
-        if self.spks is not None:
-            sid_embs = self.sid_emb(sids.view(-1))
-            hs = hs + sid_embs.unsqueeze(1)
-        if self.langs is not None:
-            lid_embs = self.lid_emb(lids.view(-1))
-            hs = hs + lid_embs.unsqueeze(1)
-
-        # integrate speaker embedding
-        if self.spk_embed_dim is not None:
-            hs = self._integrate_with_spk_embed(hs, spembs)
-
-        h_masks = make_pad_mask(text_lengths).to(hs.device)
-        if use_teacher_forcing:
-            # forward alignment module and obtain duration, averaged pitch, energy
-            log_p_attn = self.alignment_module(hs, feats, h_masks)
-            d_outs, _ = viterbi_decode(log_p_attn, text_lengths, feats_lengths)
-            p_outs = average_by_duration(
-                d_outs, pitch.squeeze(-1), text_lengths, feats_lengths
-            ).unsqueeze(-1)
-            e_outs = average_by_duration(
-                d_outs, energy.squeeze(-1), text_lengths, feats_lengths
-            ).unsqueeze(-1)
-        else:
-            # forward duration predictor and variance predictors
-            p_outs = self.pitch_predictor(hs, h_masks.unsqueeze(-1))
-            e_outs = self.energy_predictor(hs, h_masks.unsqueeze(-1))
-            d_outs = self.duration_predictor.inference(hs, h_masks)
-
-        p_embs = self.pitch_embed(p_outs.transpose(1, 2)).transpose(1, 2)
-        e_embs = self.energy_embed(e_outs.transpose(1, 2)).transpose(1, 2)
-        hs = hs + e_embs + p_embs
-
-        # upsampling
-        if feats_lengths is not None:
-            h_masks = make_non_pad_mask(feats_lengths).to(hs.device)
-        else:
-            h_masks = None
-        d_masks = make_non_pad_mask(text_lengths).to(d_outs.device)
-        hs = self.length_regulator(hs, d_outs, h_masks, d_masks)  # (B, T_feats, adim)
-
-        # forward decoder
-        if feats_lengths is not None:
-            h_masks = self._source_mask(feats_lengths)
-        else:
-            h_masks = None
-        zs, _ = self.decoder(hs,style_vector ,h_masks)  # (B, T_feats, adim)
-        mel_linear = torch.nn.Linear(self.adim,80,device='cuda')
-        zs = mel_linear(zs)
-        print('-------zs shape:',zs.shape)
-
-        return zs, d_outs
-
-        # forward generator
-        # wav = self.generator(zs.transpose(1, 2))
-
-        # return wav.squeeze(1), d_outs
 
     def _integrate_with_spk_embed(
         self, hs: torch.Tensor, spembs: torch.Tensor

@@ -41,11 +41,9 @@ class ESPnetTTSModel(AbsESPnetModel):
         """Initialize ESPnetTTSModel module."""
         assert check_argument_types()
         super().__init__()
-        # feats_extract: LogMelFbank()
         self.feats_extract = feats_extract
         self.pitch_extract = pitch_extract
         self.energy_extract = energy_extract
-        # normalize = GlobalMVN()
         self.normalize = normalize
         self.pitch_normalize = pitch_normalize
         self.energy_normalize = energy_normalize
@@ -251,18 +249,14 @@ class ESPnetTTSModel(AbsESPnetModel):
 
         """
         input_dict = dict(text=text)
-        if decode_config["use_teacher_forcing"] or getattr(self.tts, "use_gst", False) or getattr(self.tts, "use_saln", True):
+        if decode_config["use_teacher_forcing"] or getattr(self.tts, "use_gst", False):
             if speech is None:
                 raise RuntimeError("missing required argument: 'speech'")
-            
-            # self.feats_extract = LogMelFbank()
             if self.feats_extract is not None:
                 feats = self.feats_extract(speech[None])[0][0]
             else:
                 # Use precalculated feats (feats_type != raw case)
                 feats = speech
-            
-            # self.normalize = GlobalMVN()
             if self.normalize is not None:
                 feats = self.normalize(feats[None])[0][0]
             input_dict.update(feats=feats)
