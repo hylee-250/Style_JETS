@@ -32,8 +32,8 @@ from espnet2.torch_utils.device_funcs import force_gatherable
 
 from espnet2.gan_tts.jets.saln import SALNEncoder, MelStyleEncoder
 from espnet2.gan_tts.jets.style_discriminator import MetaDiscriminator
-from espnet2.gan_tts.jets.length_regulator import LengthRegulator
-
+from espnet2.gan_tts.jets.length_regulator import GaussianUpsampling,LengthRegulator
+from espnet.nets.pytorch_backend.nets_utils import make_non_pad_mask, make_pad_mask
 
 AVAILABLE_GENERATERS = {
     "jets_generator": JETSGenerator,
@@ -283,6 +283,8 @@ class JETS(AbsGANTTS):
         if self.generator.use_saln:
             self.meta_discriminator = self.generator.meta_discriminator
             self.meta_adv_loss = self.meta_discriminator.get_criterion()
+
+        self.length_regulator = GaussianUpsampling()
 
         # coefficients
         self.lambda_adv = lambda_adv
@@ -566,9 +568,15 @@ class JETS(AbsGANTTS):
         src_word_emb = torch.nn.Embedding(152, self.generator.adim, padding_idx=0,device='cuda')
         q_src_output = src_word_emb(q_text)
         print('----------q_src output:',q_src_output.shape)
-        length_regulator = LengthRegulator()
-        print('----------dur shape:',dur.shape)
-        q_src,_,_ = length_regulator(q_src_output,dur)
+
+        # upsampling
+        h_masks = make_non_pad_mask(feats_lengths).to(q_src_output.device)
+        d_masks = make_non_pad_mask(text_lengths).to(dur.device)
+        q_src = self.length_regulator(q_src_output, dur, h_masks, d_masks)  # (B, T_feats, adim)
+
+        # length_regulator = LengthRegulator()
+        # print('----------dur shape:',dur.shape)
+        # q_src,_,_ = length_regulator(q_src_output,dur)
 
         print('----------q_src shape:',q_src.shape)
 
@@ -728,8 +736,14 @@ class JETS(AbsGANTTS):
 
         src_word_emb = torch.nn.Embedding(152, self.generator.adim, padding_idx=0,device='cuda')
         q_src_output = src_word_emb(q_text)
-        length_regulator = LengthRegulator()
-        q_src,_,_ = length_regulator(q_src_output,dur)
+
+        # upsampling
+        h_masks = make_non_pad_mask(feats_lengths).to(hs.device)
+        d_masks = make_non_pad_mask(text_lengths).to(ds.device)
+        q_src = self.length_regulator(q_src_output, dur, h_masks, d_masks)  # (B, T_feats, adim)
+
+        # length_regulator = LengthRegulator()
+        # q_src,_,_ = length_regulator(q_src_output,dur)
 
         src_target_output = src_word_emb(text)
         src_target,_,_ = length_regulator(q_src_output,ds)

@@ -1,1 +1,0 @@
-../../../wsj0_2mix_spatialized/enh1/local/spatialize_wsj0_mix.sh

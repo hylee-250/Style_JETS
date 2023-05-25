@@ -37,7 +37,7 @@ if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
     log "stage -1: local/donwload_and_untar.sh"
     # download the original corpus
     if [ ! -e "${db_root}"/LibriTTS/.complete ]; then
-        for part in dev-clean dev-other test-clean test-other train-clean-100 train-clean-360 train-other-500; do
+        for part in dev-clean dev-other test-clean test-other train-clean-100; do
             local/download_and_untar.sh "${db_root}" "${data_url}" "${part}"
         done
         touch "${db_root}/LibriTTS/.complete"
@@ -51,7 +51,7 @@ if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
         cat "${db_root}"/LibriTTSCorpusLabel/lab.tar.gz-* > "${db_root}/LibriTTS/lab.tar.gz"
         cwd=$(pwd)
         cd "${db_root}/LibriTTS"
-        for part in dev-clean dev-other test-clean test-other train-clean-100 train-clean-360 train-other-500; do
+        for part in dev-clean dev-other test-clean test-other train-clean-100; do
             gunzip -c lab.tar.gz | tar xvf - "lab/phone/${part}" --strip-components=2
         done
         touch .lab_complete
@@ -68,7 +68,7 @@ if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
         [ ! -e data/local ] && mkdir -p data/local
         cp ${db_root}/LibriTTS/SPEAKERS.txt data/local
     fi
-    for name in dev-clean test-clean train-clean-100 train-clean-360; do
+    for name in dev-clean test-clean train-clean-100; do
         if "${trim_all_silence}"; then
             # Remove all silence and re-create wav file
             local/trim_all_silence.py "${db_root}/LibriTTS/${name}" data/local/${name}
@@ -92,7 +92,7 @@ fi
 
 if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
     log "stage 1: utils/combine_data.sh"
-    utils/combine_data.sh data/train-clean-460 data/train-clean-100 data/train-clean-360
+    utils/combine_data.sh data/train-clean-100
 fi
 
 log "Successfully finished. [elapsed=${SECONDS}s]"

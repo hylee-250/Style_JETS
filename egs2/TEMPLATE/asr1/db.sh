@@ -62,7 +62,7 @@ MISP2021=
 MSUPERB=/ocean/projects/cis210027p/shared/corpora/MultilingualSUPERB
 L3DAS22=
 LIBRIMIX=downloads
-LIBRITTS=
+LIBRITTS=downloads
 LJSPEECH=downloads
 MUSAN=
 MUST_C=downloads
@@ -254,7 +254,7 @@ if [[ "$(hostname -d)" == clsp.jhu.edu ]]; then
     SLURP=
     MEDIASPEECH=downloads
     MINI_LIBRISPEECH=downloads
-    LIBRITTS=
+    LIBRITTS=downloads
     LJSPEECH=downloads
     JMD=downloads
     JSSS=downloads

@@ -30,6 +30,7 @@ from espnet2.utils import config_argparse
 from espnet2.utils.types import str2bool, str2triple_str, str_or_none
 from espnet.utils.cli_utils import get_commandline_args
 
+import pdb
 
 class Text2Speech:
     """Text2Speech class.
@@ -227,7 +228,7 @@ class Text2Speech:
     @property
     def use_speech(self) -> bool:
         """Return speech is needed or not in the inference."""
-        return self.use_teacher_forcing or getattr(self.tts, "use_gst", False)
+        return self.use_teacher_forcing or getattr(self.tts, "use_gst", False) or getattr(self.tts, "use_saln", True)
 
     @property
     def use_sids(self) -> bool:

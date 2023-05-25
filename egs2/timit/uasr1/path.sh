@@ -1,1 +1,0 @@
-../../TEMPLATE/uasr1/path.sh

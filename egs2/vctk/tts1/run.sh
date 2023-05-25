@@ -5,13 +5,12 @@ set -e
 set -u
 set -o pipefail
 
-fs=24000
-n_fft=2048
-n_shift=300
-win_length=1200
+fs=16000
+n_fft=1024
+n_shift=256
 
 opts=
-if [ "${fs}" -eq 48000 ]; then
+if [ "${fs}" -eq 16000 ]; then
     # To suppress recreation, specify wav format
     opts="--audio_format wav "
 else
@@ -22,19 +21,19 @@ train_set=tr_no_dev
 valid_set=dev
 test_sets="dev eval1"
 
-train_config=conf/train.yaml
-inference_config=conf/decode.yaml
+train_config=conf/tuning/train_jets.yaml
+inference_config=conf/tuning/decode_jets.yaml
 
 # g2p=g2p_en # Include word separator
 g2p=g2p_en_no_space # Include no word separator
 
 ./tts.sh \
+    --ngpu 1 \
     --lang en \
     --feats_type raw \
     --fs "${fs}" \
     --n_fft "${n_fft}" \
     --n_shift "${n_shift}" \
-    --win_length "${win_length}" \
     --token_type phn \
     --cleaner tacotron \
     --g2p "${g2p}" \
@@ -44,4 +43,6 @@ g2p=g2p_en_no_space # Include no word separator
     --valid_set "${valid_set}" \
     --test_sets "${test_sets}" \
     --srctexts "data/${train_set}/text" \
+    --tts_task gan_tts \
+    --min_wav_duration 1 \
     ${opts} "$@"

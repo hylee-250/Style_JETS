@@ -15,6 +15,7 @@ tts_conf:
     # generator related
     generator_type: jets_generator
     generator_params:
+        use_saln: True                               # Use Style Adaptive Layer Normalization
         adim: 256                                    # attention dimension
         aheads: 2                                    # number of attention heads
         elayers: 4                                   # number of encoder layers
@@ -188,7 +189,7 @@ generator_first: true # whether to start updating generator first
 num_iters_per_epoch: 1000 # number of iterations per epoch
 max_epoch: 1000           # number of epochs
 accum_grad: 1             # gradient accumulation
-batch_bins: 3000000       # batch bins (feats_type=raw)
+batch_bins: 2800000       # batch bins (feats_type=raw)
 batch_type: numel         # how to make batch
 grad_clip: -1             # gradient clipping norm
 grad_noise: false         # whether to use gradient noise injection

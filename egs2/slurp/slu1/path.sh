@@ -1,1 +1,0 @@
-../../TEMPLATE/slu1/path.sh

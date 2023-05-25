@@ -30,11 +30,14 @@ test_spm.model
 
 # recipe related
 egs*/*/*/data*
+egs*/*/*/data_backup
 egs*/*/*/db
 egs*/*/*/downloads
 egs*/*/*/dump
+egs*/*/*/dump_backup
 egs*/*/*/enhan
 egs*/*/*/exp
+egs*/*/*/exp_backup
 egs*/*/*/fbank
 egs*/*/*/mfcc
 egs*/*/*/stft

@@ -1,1 +1,0 @@
-../../../../egs/aishell2/asr1/local/prepare_data.sh
